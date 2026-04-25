@@ -21,14 +21,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-# -------------------------------------------------------------------------
-# 설정
-# -------------------------------------------------------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
-
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 FEED_SOURCES = [
@@ -46,9 +42,6 @@ MAX_ARTICLES = 5
 TABLE_NAME = "pronews_articles"
 HISTORY_FILE = "posted_articles_pronews.json"
 
-# -------------------------------------------------------------------------
-# 오늘의 일주(日柱) 계산
-# -------------------------------------------------------------------------
 GANJJI = [
     "갑자","을축","병인","정묘","무진","기사","경오","신미","임신","계유",
     "갑술","을해","병자","정축","무인","기묘","경진","신사","임오","계미",
@@ -65,15 +58,12 @@ GANJI_OHAENG = {
 
 def get_today_ilju() -> str:
     today = date.today()
-    base = date(2024, 1, 1)  # 갑자일 기준
+    base = date(2024, 1, 1)
     idx = (today - base).days % 60
     ganji = GANJJI[idx]
     ohaeng = GANJI_OHAENG[ganji[0]]
     return f"{ganji}일({ohaeng}의 기운)"
 
-# -------------------------------------------------------------------------
-# 저작권 문구 제거
-# -------------------------------------------------------------------------
 COPYRIGHT_PATTERNS = [
     r'<p[^>]*>©.*?</p>',
     r'<p[^>]*>&copy;.*?</p>',
@@ -88,7 +78,6 @@ def remove_copyright(html: str) -> str:
     for pattern in COPYRIGHT_PATTERNS:
         html = re.sub(pattern, '', html, flags=re.DOTALL)
     return html.strip()
-
 
 def contains_keyword(title: str) -> bool:
     return any(kw in title for kw in KEYWORDS)
@@ -108,18 +97,47 @@ class ProNewsCrawler:
         else:
             self.posted_articles = {}
 
+    def is_in_supabase(self, url: str) -> bool:
+        try:
+            res = self.supabase.table(TABLE_NAME) \
+                .select('id') \
+                .eq('original_url', url) \
+                .execute()
+            return bool(res.data)
+        except Exception:
+            return False
+
     def collect_entries(self):
         feedparser.USER_AGENT = USER_AGENT
-        entries = []
+        new_entries = []
+        fallback_entries = []
+
         for url in FEED_SOURCES:
             feed = feedparser.parse(url)
             logger.info(f"[RSS] {url} → {len(feed.entries)}개")
             for e in feed.entries:
-                if e.link in self.posted_articles:
+                if not contains_keyword(e.title):
                     continue
-                if contains_keyword(e.title):
-                    entries.append(e)
-        return entries[:MAX_ARTICLES]
+                if e.link not in self.posted_articles:
+                    new_entries.append(e)
+                else:
+                    fallback_entries.append(e)
+
+        articles = new_entries[:MAX_ARTICLES]
+
+        # 5개 미달 시 과거 기사로 채우기 (Supabase에 없는 것만)
+        if len(articles) < MAX_ARTICLES:
+            needed = MAX_ARTICLES - len(articles)
+            logger.info(f"새 기사 {len(articles)}개 → {needed}개 과거 기사로 보충")
+            for e in fallback_entries:
+                if needed <= 0:
+                    break
+                if not self.is_in_supabase(e.link):
+                    articles.append(e)
+                    needed -= 1
+
+        logger.info(f"최종 수집: {len(articles)}개")
+        return articles
 
     def fetch_article(self, url: str) -> Optional[Dict]:
         try:
@@ -140,17 +158,13 @@ class ProNewsCrawler:
                 if first_img:
                     img_url = first_img.get('src', '')
 
-            return {
-                'text': content.get_text()[:3000],
-                'img_url': img_url,
-            }
+            return {'text': content.get_text()[:3000], 'img_url': img_url}
         except Exception as e:
             logger.error(f"기사 크롤링 실패: {e}")
             return None
 
     def translate_article(self, title: str, text: str) -> Optional[Dict]:
         today_str = date.today().strftime("%Y년 %m월 %d일")
-
         prompt = (
             f"오늘은 {today_str}, {self.today_ilju}입니다.\n"
             "이 일주의 오행 기운을 콘텐츠에 자연스럽게 녹여서 "
@@ -189,16 +203,13 @@ class ProNewsCrawler:
             c = re.sub(r'<img[^>]*/?>', '', c)
             c = remove_copyright(c)
 
-            # 2차 검수 호출
             c, t = self.review_article(t, c)
-
             return {'title': t, 'content': c}
         except Exception as e:
             logger.error(f"❌ 번역 에러: {e}")
             return None
 
     def review_article(self, title: str, content: str):
-        """2차 검수: 애드센스 수익화 관점 품질 보완"""
         review_prompt = (
             "아래 한국어 블로그 글을 애드센스 수익화 관점에서 검토하고 부족한 부분만 보완하세요.\n"
             "체크 항목:\n"
@@ -263,9 +274,7 @@ class ProNewsCrawler:
             logger.info("새로운 기사 없음")
             return
 
-        logger.info(f"수집된 기사: {len(entries)}개")
         saved = 0
-
         for entry in entries:
             logger.info(f"▶ {entry.title[:50]}")
 
