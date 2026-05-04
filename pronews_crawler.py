@@ -31,12 +31,16 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 FEED_SOURCES = [
     "https://president.jp/list/rss",
     "https://blog.hinata-fortune.jp/feed/",
+    "https://toyokeizai.net/list/feed/rss",       # 동양경제 (재테크/투자/자기계발)
+    "https://www.lifehacker.jp/feed/index.xml",    # 라이프해커 일본 (생산성/자기계발)
 ]
 
 KEYWORDS = [
     "運", "風水", "習慣", "成功", "お金", "資産", "金運",
     "仕事", "稼ぐ", "億", "節約", "投資", "富", "開運",
     "四柱推命", "占い", "運勢", "財", "豊か",
+    "副業", "節税", "貯金", "FIRE", "自己啓発", "生産性",
+    "ランニング", "習慣化", "メンタル", "健康", "朝活",
 ]
 
 MAX_ARTICLES = 5
@@ -66,9 +70,18 @@ def contains_keyword(title: str) -> bool:
 
 # 한국 독자와 무관한 일본 로컬 기사 제외
 EXCLUDE_KEYWORDS = [
+    # 왕실/정치
     "天皇", "皇室", "王室", "皇族", "御所", "宮内庁", "陛下", "殿下",
     "大河", "NHK", "参議院", "衆議院", "国会", "内閣", "首相",
+    # 역사
     "戦国", "江戸", "明治", "昭和", "平成",
+    # 국제/외교/군사
+    "台湾", "北朝鮮", "中国", "ホルムズ", "海峡", "核", "ミサイル",
+    "ウクライナ", "ロシア", "戦争", "軍", "防衛",
+    # 재해/사건
+    "地震", "津波", "災害", "事故", "殺", "犯罪",
+    # 크루즈/감염병
+    "クルーズ", "感染", "ウイルス",
 ]
 
 def is_excluded(title: str) -> bool:
