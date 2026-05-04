@@ -64,6 +64,16 @@ def remove_copyright(html: str) -> str:
 def contains_keyword(title: str) -> bool:
     return any(kw in title for kw in KEYWORDS)
 
+# 한국 독자와 무관한 일본 로컬 기사 제외
+EXCLUDE_KEYWORDS = [
+    "天皇", "皇室", "王室", "皇族", "御所", "宮内庁", "陛下", "殿下",
+    "大河", "NHK", "参議院", "衆議院", "国会", "内閣", "首相",
+    "戦国", "江戸", "明治", "昭和", "平成",
+]
+
+def is_excluded(title: str) -> bool:
+    return any(kw in title for kw in EXCLUDE_KEYWORDS)
+
 
 class ProNewsCrawler:
     def __init__(self):
@@ -90,9 +100,9 @@ class ProNewsCrawler:
     def collect_entries(self):
         feedparser.USER_AGENT = USER_AGENT
         new_entries = []
-        fallback_keyword = []  # 키워드 통과 + history 있음
-        fallback_all = []      # 키워드 무관 + history 있음 (최후 보충용)
-        seen_titles = set()    # 제목 중복 체크용
+        fallback_keyword = []
+        fallback_all = []
+        seen_titles = set()
 
         for url in FEED_SOURCES:
             feed = feedparser.parse(url)
@@ -105,12 +115,17 @@ class ProNewsCrawler:
                     continue
                 seen_titles.add(title_key)
 
+                # 일본 로컬 기사 제외
+                if is_excluded(e.title):
+                    logger.info(f"제외 키워드 스킵: {e.title[:40]}")
+                    continue
+
                 passes_keyword = contains_keyword(e.title)
                 if e.link not in self.posted_articles:
                     if passes_keyword:
                         new_entries.append(e)
                     else:
-                        fallback_all.append(e)  # 키워드 미통과 새 기사도 최후 보충용으로
+                        fallback_all.append(e)
                 else:
                     if passes_keyword:
                         fallback_keyword.append(e)
@@ -283,6 +298,11 @@ class ProNewsCrawler:
         saved = 0
         for entry in entries:
             logger.info(f"▶ {entry.title[:50]}")
+
+            # 번역 전 Supabase 중복 체크 (토큰 낭비 방지)
+            if self.is_in_supabase(entry.link):
+                logger.info(f"이미 저장됨 (스킵): {entry.link}")
+                continue
 
             data = self.fetch_article(entry.link)
             if not data:
