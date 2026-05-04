@@ -101,7 +101,6 @@ class ProNewsCrawler:
         feedparser.USER_AGENT = USER_AGENT
         new_entries = []
         fallback_keyword = []
-        fallback_all = []
         seen_titles = set()
 
         for url in FEED_SOURCES:
@@ -111,45 +110,30 @@ class ProNewsCrawler:
                 # 제목 중복 체크
                 title_key = e.title.strip()[:50]
                 if title_key in seen_titles:
-                    logger.info(f"제목 중복 스킵: {title_key}")
                     continue
                 seen_titles.add(title_key)
 
                 # 일본 로컬 기사 제외
                 if is_excluded(e.title):
-                    logger.info(f"제외 키워드 스킵: {e.title[:40]}")
+                    logger.info(f"제외 스킵: {e.title[:40]}")
                     continue
 
-                passes_keyword = contains_keyword(e.title)
+                # 키워드 통과한 기사만 수집
+                if not contains_keyword(e.title):
+                    continue
+
                 if e.link not in self.posted_articles:
-                    if passes_keyword:
-                        new_entries.append(e)
-                    else:
-                        fallback_all.append(e)
+                    new_entries.append(e)
                 else:
-                    if passes_keyword:
-                        fallback_keyword.append(e)
-                    else:
-                        fallback_all.append(e)
+                    fallback_keyword.append(e)
 
         articles = new_entries[:MAX_ARTICLES]
 
-        # 1차 보충: 키워드 통과 과거 기사
+        # 5개 미달 시: 키워드 통과 과거 기사로 보충 (Supabase 미저장만)
         if len(articles) < MAX_ARTICLES:
             needed = MAX_ARTICLES - len(articles)
-            logger.info(f"새 기사 {len(articles)}개 → {needed}개 과거 기사(키워드 통과)로 보충")
+            logger.info(f"새 기사 {len(articles)}개 → {needed}개 과거 기사로 보충")
             for e in fallback_keyword:
-                if needed <= 0:
-                    break
-                if not self.is_in_supabase(e.link):
-                    articles.append(e)
-                    needed -= 1
-
-        # 2차 보충: 키워드 무관 RSS 전체
-        if len(articles) < MAX_ARTICLES:
-            needed = MAX_ARTICLES - len(articles)
-            logger.info(f"여전히 {needed}개 부족 → RSS 전체로 보충")
-            for e in fallback_all:
                 if needed <= 0:
                     break
                 if not self.is_in_supabase(e.link):
